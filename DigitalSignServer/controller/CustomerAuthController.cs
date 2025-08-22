@@ -10,11 +10,7 @@ namespace DigitalSignServer.controller
     public class CustomerAuthController : ControllerBase
     {
         private readonly ICustomerAuthService _authService;
-
-        public CustomerAuthController(ICustomerAuthService authService)
-        {
-            _authService = authService;
-        }
+        public CustomerAuthController(ICustomerAuthService authService) => _authService = authService;
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] CustomerLoginRequest request)
@@ -25,11 +21,32 @@ namespace DigitalSignServer.controller
             Response.Cookies.Append("jwt", token, new CookieOptions
             {
                 HttpOnly = true,
-                Secure = false, // לשים true בפרודקשן
-                SameSite = SameSiteMode.Strict,
-                Expires = DateTime.UtcNow.AddHours(2)
+                Secure = true,                 // בפיתוח ללא https שקול ל־false
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.UtcNow.AddHours(2),
+                Path = "/"
+            });
+            return Ok();
+        }
+
+        [HttpPost("logout")]
+        public IActionResult Logout()
+        {
+            Response.Cookies.Delete("jwt", new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Path = "/"
             });
             return Ok();
         }
     }
+
+    public class CustomerLoginRequest
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
 }
+
