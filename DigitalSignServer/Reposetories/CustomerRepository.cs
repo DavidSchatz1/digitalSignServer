@@ -26,7 +26,7 @@ namespace DigitalSignServer.Reposetories
             return customer;
         }
 
-        public async Task<bool> DeleteAsync(int id)
+        public async Task<bool> DeleteAsync(Guid id)
         {
             var customer = await _context.customers.FindAsync(id);
             if (customer == null) return false;

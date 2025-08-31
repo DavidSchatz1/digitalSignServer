@@ -6,7 +6,7 @@ namespace DigitalSignServer.Reposetories
     {
         Task<Customer?> GetByEmailAsync(string email);
         Task<Customer> AddAsync(Customer customer);
-        Task<bool> DeleteAsync(int id);
+        Task<bool> DeleteAsync(Guid id);
 
         Task<List<CustomerDTO>> GetAllAsync();
     }

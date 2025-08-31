@@ -1,12 +1,20 @@
 
 using DigitalSignServer.context;
 using DigitalSignServer.models;
+using DigitalSignServer.Options;
 using DigitalSignServer.Reposetories;
 using DigitalSignServer.services;
+using DigitalSignServer.Services;
+using DigitalSignServer.Storage;
+using Amazon.S3;
+using Amazon.Extensions.NETCore.Setup;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text;
+using Syncfusion.Licensing;
 
 namespace DigitalSignServer
 {
@@ -15,6 +23,20 @@ namespace DigitalSignServer
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            var syncfusionLicense = builder.Configuration["Syncfusion:LicenseKey"];
+            if (string.IsNullOrWhiteSpace(syncfusionLicense))
+            {
+                // אל תדפיס את המפתח ללוגים
+                throw new InvalidOperationException("Syncfusion license key is missing. Set it via dotnet user-secrets.");
+            }
+
+            SyncfusionLicenseProvider.RegisterLicense(syncfusionLicense);
+
+            builder.Logging.ClearProviders();
+            builder.Logging.AddConsole();
+            builder.Services.AddLogging();
+
 
             // Add services to the container.
             var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
@@ -42,6 +64,19 @@ namespace DigitalSignServer
             builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
             builder.Services.AddScoped<ICustomerAuthRepository, CustomerAuthRepository>();
             builder.Services.AddScoped<ICustomerAuthService, CustomerAuthService>();
+            builder.Services.AddScoped<TemplateFillService>();
+            builder.Services.AddScoped<ITemplateFillRepository, TemplateFillRepository>();
+
+
+
+            builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+            builder.Services.AddAWSService<IAmazonS3>();
+
+            builder.Services.Configure<S3Options>(builder.Configuration.GetSection("S3"));
+            builder.Services.Configure<UploadLimitsOptions>(builder.Configuration.GetSection("UploadLimits"));
+
+            builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
+            builder.Services.AddScoped<TemplateService>();
 
 
             builder.Services.AddAuthentication("Bearer")
@@ -59,6 +94,18 @@ namespace DigitalSignServer
                             Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
                         RoleClaimType = ClaimTypes.Role,
                         NameClaimType = ClaimTypes.Name
+                    };
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = context =>
+                        {
+                            if (context.Request.Cookies.TryGetValue("jwt", out var token) &&
+                                !string.IsNullOrWhiteSpace(token))
+                            {
+                                context.Token = token;
+                            }
+                            return Task.CompletedTask;
+                        }
                     };
                 });
 

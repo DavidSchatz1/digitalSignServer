@@ -34,8 +34,8 @@ namespace DigitalSignServer.Controllers
             return Ok(new { created.Id, created.Email });
         }
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(int id)
+        [HttpDelete("{id:guid}")]
+        public async Task<IActionResult> Delete(Guid id)
         {
             var success = await _customerRepo.DeleteAsync(id);
             if (!success) return NotFound("Customer not found");

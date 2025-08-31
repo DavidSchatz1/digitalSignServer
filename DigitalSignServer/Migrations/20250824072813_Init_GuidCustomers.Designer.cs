@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DigitalSignServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250821064340_change from passwordhash to password")]
-    partial class changefrompasswordhashtopassword
+    [Migration("20250824072813_Init_GuidCustomers")]
+    partial class Init_GuidCustomers
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -27,11 +27,9 @@ namespace DigitalSignServer.Migrations
 
             modelBuilder.Entity("DigitalSignServer.models.Customer", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");

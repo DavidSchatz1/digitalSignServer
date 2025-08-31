@@ -36,6 +36,13 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
+    },
+    "DigitalSignServer": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "AWS_PROFILE": "digital-sign-dev"
+      }
     }
   }
 }

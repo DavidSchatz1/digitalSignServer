@@ -21,7 +21,7 @@ namespace DigitalSignServer.controller
             Response.Cookies.Append("jwt", token, new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,                 // בפיתוח ללא https שקול ל־false
+                Secure = true, 
                 SameSite = SameSiteMode.None,
                 Expires = DateTime.UtcNow.AddHours(2),
                 Path = "/"

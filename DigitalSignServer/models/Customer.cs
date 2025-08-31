@@ -4,7 +4,7 @@ namespace DigitalSignServer.models
 {
     public class Customer
     {
-        public int Id { get; set; }
+        public Guid Id { get; set; }
         public string Password { get; set; } = string.Empty;
 
         [Required]
