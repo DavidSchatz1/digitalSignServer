@@ -61,6 +61,7 @@ public class TemplatesController : ControllerBase
         var items = await _svc.GetByCustomerAsync(customerId, ct);
         return Ok(items);
     }
+
     // Convenience for logged-in Customer to list their own templates (requires CustomerId claim)
     [HttpGet("mine")]
     [Authorize(Roles = "Customer")]

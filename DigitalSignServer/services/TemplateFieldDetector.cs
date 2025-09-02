@@ -1,11 +1,18 @@
 ﻿using Syncfusion.DocIO;
 using Syncfusion.DocIO.DLS;
+using DigitalSignServer.Utils;
 
 namespace DigitalSignServer.Services;
 
 public sealed class TemplateFieldDetector
 {
-    public async Task<List<DetectedField>> DetectContentControlsAsync(Stream docxStream, CancellationToken ct)
+    private static bool IsPureSignTag(string? tag)
+    {
+        var t = (tag ?? string.Empty).Trim();
+        return t.Equals("SIGN", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<DetectResult> DetectFieldsAndAnchorsAsync(Stream docxStream, CancellationToken ct)
     {
         if (docxStream == null) throw new ArgumentNullException(nameof(docxStream));
 
@@ -13,25 +20,37 @@ public sealed class TemplateFieldDetector
         await docxStream.CopyToAsync(ms, ct);
         ms.Position = 0;
 
-        var found = new List<(string tag, string? title)>();
+        // איסוף גולמי
+        var rawFields = new List<(string tag, string? title)>();
+        var signAnchorsOrder = new List<int>(); // רק סדר (1..N)
 
         using (var document = new WordDocument(ms, FormatType.Docx))
         {
-            // סריקה של כל הסקשנים/גוף המסמך
+            int signCounter = 0;
+
+            // גוף + כותרות/כותרות תחתונות
             foreach (WSection section in document.Sections)
             {
+                // גוף המסמך
                 if (section?.Body is ICompositeEntity body)
+                    TraverseComposite(body, rawFields, ref signCounter, signAnchorsOrder);
+
+                // headers/footers
+                var hf = section?.HeadersFooters;
+                if (hf != null)
                 {
-                    TraverseComposite(body, found);
+                    foreach (var part in new[] { hf.OddHeader, hf.OddFooter, hf.EvenHeader, hf.EvenFooter, hf.FirstPageHeader, hf.FirstPageFooter })
+                        if (part is ICompositeEntity comp)
+                            TraverseComposite(comp, rawFields, ref signCounter, signAnchorsOrder);
                 }
             }
         }
 
-        // המרה ל-DetectedField + דה-דופ לפי Tag (Key)
-        var result = found
-            .Where(x => !string.IsNullOrWhiteSpace(x.tag))
+        // שדות: קיבוץ לפי Tag (ללא SIGN), כמו קודם
+        var fields = rawFields
+            .Where(x => !string.IsNullOrWhiteSpace(x.tag) && !IsPureSignTag(x.tag))
             .GroupBy(x => x.tag.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
+            .Select((g, idx) =>
             {
                 var first = g.First();
                 var key = first.tag.Trim();
@@ -42,23 +61,37 @@ public sealed class TemplateFieldDetector
                     Label = label,
                     DetectedFrom = "contentControl",
                     Type = "text",
-                    IsRequired = false
+                    IsRequired = false,
+                    Order = idx + 1
                 };
             })
             .ToList();
 
-        for (int i = 0; i < result.Count; i++)
-            result[i].Order = i + 1;
+        // Anchors: לפי סדר הופעה (1..N)
+        var anchors = signAnchorsOrder
+            .Select(ord => new DetectedAnchor { Order = ord })
+            .ToList();
 
-        return result;
+        return new DetectResult
+        {
+            Fields = fields,
+            Anchors = anchors
+        };
+
     }
 
     /// <summary>
-    /// יורד רקורסיבית בישויות מרכיבות (ICompositeEntity) ואוסף ContentControls.
+    /// יורד רקורסיבית ואוסף:
+    /// - כל ה-CC לשדות (מלבד SIGN)
+    /// - כל CC עם Tag="SIGN" רק כספירת Anchor (Order)
     /// </summary>
-    private static void TraverseComposite(ICompositeEntity composite, List<(string tag, string? title)> sink)
+    private static void TraverseComposite(
+        ICompositeEntity composite,
+        List<(string tag, string? title)> fieldsSink,
+        ref int signCounter,
+        List<int> signOrderSink)
     {
-        var children = composite.ChildEntities; // שים לב: Property, לא מתודה
+        var children = composite.ChildEntities;
         for (int i = 0; i < children.Count; i++)
         {
             var entity = children[i];
@@ -67,11 +100,21 @@ public sealed class TemplateFieldDetector
             if (entity is InlineContentControl ic)
             {
                 var props = ic.ContentControlProperties;
-                sink.Add((props?.Tag ?? string.Empty, props?.Title));
+                var tag = props?.Tag ?? string.Empty;
+                var title = props?.Title;
 
-                // גם ל-inline יש ChildEntities (התוכן הפנימי) — נרד פנימה
+                if (IsPureSignTag(tag))
+                {
+                    // Anchor בלבד – לא מצרפים ל-fieldsSink
+                    signOrderSink.Add(++signCounter);
+                }
+                else
+                {
+                    fieldsSink.Add((tag, title));
+                }
+
                 if (ic is ICompositeEntity icComp)
-                    TraverseComposite(icComp, sink);
+                    TraverseComposite(icComp, fieldsSink, ref signCounter, signOrderSink);
 
                 continue;
             }
@@ -80,32 +123,40 @@ public sealed class TemplateFieldDetector
             if (entity is BlockContentControl bc)
             {
                 var props = bc.ContentControlProperties;
-                sink.Add((props?.Tag ?? string.Empty, props?.Title));
+                var tag = props?.Tag ?? string.Empty;
+                var title = props?.Title;
+
+                if (IsPureSignTag(tag))
+                {
+                    signOrderSink.Add(++signCounter);
+                }
+                else
+                {
+                    fieldsSink.Add((tag, title));
+                }
 
                 if (bc is ICompositeEntity bcComp)
-                    TraverseComposite(bcComp, sink);
+                    TraverseComposite(bcComp, fieldsSink, ref signCounter, signOrderSink);
 
                 continue;
             }
 
-            // פסקה — מרכיב מורכב
+            // פסקה
             if (entity is WParagraph p)
             {
-                TraverseComposite(p, sink);
+                TraverseComposite(p, fieldsSink, ref signCounter, signOrderSink);
                 continue;
             }
 
-            // טבלה → תאים (כל תא הוא ICompositeEntity)
+            // טבלה
             if (entity is WTable table)
             {
                 foreach (WTableRow row in table.Rows)
                     foreach (WTableCell cell in row.Cells)
-                        TraverseComposite(cell, sink);
+                        TraverseComposite(cell, fieldsSink, ref signCounter, signOrderSink);
 
                 continue;
             }
-
-            // אפשר להוסיף כאן תמיכה ב־TextBox/Shapes/HeadersFooters בהמשך — כרגע לא דרוש
         }
     }
 }
@@ -118,4 +169,14 @@ public sealed class DetectedField
     public bool IsRequired { get; set; }
     public int Order { get; set; }
     public string Type { get; set; } = "text";
+}
+public sealed class DetectResult
+{
+    public List<DetectedField> Fields { get; set; } = new();
+    public List<DetectedAnchor> Anchors { get; set; } = new();
+}
+
+public sealed class DetectedAnchor
+{
+    public int Order { get; set; }   // סדר הופעה במסמך
 }

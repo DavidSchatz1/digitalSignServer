@@ -3,6 +3,7 @@ using System;
 using DigitalSignServer.context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DigitalSignServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250902081641_AddSignatureAnchorsAndSlots")]
+    partial class AddSignatureAnchorsAndSlots
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -299,72 +302,6 @@ namespace DigitalSignServer.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("TemplateInstances");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.TemplateInstanceSignatureSlot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double>("H")
-                        .HasColumnType("double precision");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PageIndex")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SlotKey")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TemplateInstanceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<double>("W")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("X")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("Y")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("TemplateInstanceSignatureSlots");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.TemplateSignatureAnchor", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Meta")
-                        .HasColumnType("text");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Tag")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TemplateId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("TemplateSignatureAnchors");
                 });
 
             modelBuilder.Entity("DigitalSignServer.Models.Template", b =>

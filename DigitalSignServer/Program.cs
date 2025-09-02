@@ -52,6 +52,11 @@ namespace DigitalSignServer
                                             .AllowCredentials();
                                   });
             });
+            // קונפיגורציית Options – קוראת גם מ-appsettings וגם מ-UserSecrets (Development)
+            builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+            builder.Services.Configure<PublicOptions>(builder.Configuration.GetSection("Public"));
+
+            builder.Services.AddScoped<INotificationService, SmtpEmailService>();
 
             builder.Services.AddControllers();
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -59,6 +64,7 @@ namespace DigitalSignServer
             builder.Services.AddSwaggerGen();
             builder.Services.AddDbContext<AppDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+            builder.Services.AddSingleton<IPasswordHasher<object>, PasswordHasher<object>>();
             builder.Services.AddScoped<ILawyerRepository, LawyerRepository>();
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
@@ -77,6 +83,8 @@ namespace DigitalSignServer
 
             builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
             builder.Services.AddScoped<TemplateService>();
+
+            builder.Services.AddScoped<INotificationService, SmtpEmailService>();
 
 
             builder.Services.AddAuthentication("Bearer")

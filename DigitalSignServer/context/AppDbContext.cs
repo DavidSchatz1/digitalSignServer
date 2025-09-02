@@ -18,6 +18,13 @@ namespace DigitalSignServer.context
         public DbSet<TemplateField> TemplateFields => Set<TemplateField>();
 
         public DbSet<TemplateInstance> TemplateInstances => Set<TemplateInstance>();
+        public DbSet<SignatureInvite> SignatureInvites { get; set; } = default!;
+        public DbSet<SignatureDelivery> SignatureDeliveries { get; set; } = default!;
+
+        public DbSet<TemplateSignatureAnchor> TemplateSignatureAnchors { get; set; } = null!;
+        public DbSet<TemplateInstanceSignatureSlot> TemplateInstanceSignatureSlots { get; set; } = null!;
+
+
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -44,6 +51,7 @@ namespace DigitalSignServer.context
                 e.Property(x => x.Type).HasMaxLength(32);
                 e.Property(x => x.Label).HasMaxLength(256);
             });
+
         }
     }
 }

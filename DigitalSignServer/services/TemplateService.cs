@@ -1,4 +1,5 @@
 ﻿using DigitalSignServer.context;
+using DigitalSignServer.models;
 using DigitalSignServer.Models;
 using DigitalSignServer.Storage;
 using DigitalSignServer.Utils;
@@ -108,16 +109,18 @@ public sealed class TemplateService
         // משוך את ה-DOCX מ-S3
         var (t, stream) = await OpenForDownloadAsync(templateId, ct);
 
-        // זיהוי
+        // זיהוי: שדות רגילים + עוגני SIGN (Tag="SIGN")
         var detector = new TemplateFieldDetector();
-        var detected = await detector.DetectContentControlsAsync(stream, ct);
+        var detect = await detector.DetectFieldsAndAnchorsAsync(stream, ct);
 
-        // שמירה: מוחקים הישנים ומכניסים חדשים
-        var existing = await _db.TemplateFields.Where(f => f.TemplateId == templateId).ToListAsync(ct);
-        _db.TemplateFields.RemoveRange(existing);
+        // ----- שמירת TemplateFields -----
+        var existingFields = await _db.TemplateFields
+            .Where(f => f.TemplateId == templateId)
+            .ToListAsync(ct);
+        _db.TemplateFields.RemoveRange(existingFields);
         await _db.SaveChangesAsync(ct);
 
-        var toInsert = detected.Select(f => new TemplateField
+        var toInsertFields = detect.Fields.Select(f => new TemplateField
         {
             Id = Guid.NewGuid(),
             TemplateId = templateId,
@@ -129,14 +132,35 @@ public sealed class TemplateService
             DetectedFrom = f.DetectedFrom
         }).ToList();
 
-        _db.TemplateFields.AddRange(toInsert);
+        _db.TemplateFields.AddRange(toInsertFields);
 
-        // עדכון סטטוס בתבנית
+        // ----- שמירת TemplateSignatureAnchors (רק SIGN) -----
+        var existingAnchors = await _db.TemplateSignatureAnchors
+            .Where(a => a.TemplateId == templateId)
+            .ToListAsync(ct);
+        _db.TemplateSignatureAnchors.RemoveRange(existingAnchors);
+
+        var toInsertAnchors = detect.Anchors.Select(a => new TemplateSignatureAnchor
+        {
+            Id = Guid.NewGuid(),
+            TemplateId = templateId,
+            Tag = "SIGN", // שומרים אחיד
+            Order = a.Order,
+            Meta = null,
+            CreatedAt = DateTimeOffset.UtcNow
+        }).ToList();
+
+        if (toInsertAnchors.Count > 0)
+            _db.TemplateSignatureAnchors.AddRange(toInsertAnchors);
+
+        // ----- עדכון סטטוס בתבנית -----
         t.Status = "FieldsDetected";
         t.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _db.SaveChangesAsync(ct);
-        return toInsert;
+
+        return toInsertFields;
     }
+
 
 }

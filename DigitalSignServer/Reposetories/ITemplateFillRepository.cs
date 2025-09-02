@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using DigitalSignServer.dto;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +18,7 @@ namespace DigitalSignServer.Reposetories
             Guid templateId,
             Guid customerId,
             IDictionary<string, string> values,
+            SignatureDeliveryRequest? signatureDelivery,
             CancellationToken ct);
     }
 }

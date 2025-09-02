@@ -3,6 +3,7 @@ using System;
 using DigitalSignServer.context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DigitalSignServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250901080109_SignatureInvites_Initial")]
+    partial class SignatureInvites_Initial
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -159,104 +162,6 @@ namespace DigitalSignServer.Migrations
                     b.ToTable("Lawyers");
                 });
 
-            modelBuilder.Entity("DigitalSignServer.models.SignatureDelivery", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("AttemptedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Channel")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Error")
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("InviteId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ProviderMessageId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InviteId");
-
-                    b.ToTable("SignatureDeliveries");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.SignatureInvite", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DeliveryChannel")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("MaxUses")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("OpenedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("OtpExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OtpHash")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("RecipientEmail")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("RequiresPassword")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("SignedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SignerEmail")
-                        .HasColumnType("text");
-
-                    b.Property<string>("SignerName")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TemplateInstanceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Token")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("Uses")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TemplateInstanceId");
-
-                    b.ToTable("SignatureInvites");
-                });
-
             modelBuilder.Entity("DigitalSignServer.models.TemplateInstance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -269,21 +174,12 @@ namespace DigitalSignServer.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("PdfSha256")
-                        .HasColumnType("text");
-
                     b.Property<string>("S3KeyDocx")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("S3KeyPdf")
                         .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("SignedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SignedPdfS3Key")
                         .HasColumnType("text");
 
                     b.Property<string>("Status")
@@ -299,72 +195,6 @@ namespace DigitalSignServer.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("TemplateInstances");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.TemplateInstanceSignatureSlot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double>("H")
-                        .HasColumnType("double precision");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PageIndex")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SlotKey")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TemplateInstanceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<double>("W")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("X")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("Y")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("TemplateInstanceSignatureSlots");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.TemplateSignatureAnchor", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Meta")
-                        .HasColumnType("text");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Tag")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TemplateId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("TemplateSignatureAnchors");
                 });
 
             modelBuilder.Entity("DigitalSignServer.Models.Template", b =>
@@ -387,28 +217,6 @@ namespace DigitalSignServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Template");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.SignatureDelivery", b =>
-                {
-                    b.HasOne("DigitalSignServer.models.SignatureInvite", "Invite")
-                        .WithMany()
-                        .HasForeignKey("InviteId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Invite");
-                });
-
-            modelBuilder.Entity("DigitalSignServer.models.SignatureInvite", b =>
-                {
-                    b.HasOne("DigitalSignServer.models.TemplateInstance", "TemplateInstance")
-                        .WithMany()
-                        .HasForeignKey("TemplateInstanceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("TemplateInstance");
                 });
 
             modelBuilder.Entity("DigitalSignServer.Models.Template", b =>

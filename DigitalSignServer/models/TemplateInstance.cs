@@ -11,6 +11,10 @@
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
         public string Status { get; set; } = "Filling";     // Filling -> Filled -> PdfReady
+
+        public string? SignedPdfS3Key { get; set; }
+        public DateTime? SignedAt { get; set; }
+        public string? PdfSha256 { get; set; }
     }
 
 }
