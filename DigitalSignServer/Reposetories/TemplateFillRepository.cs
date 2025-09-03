@@ -127,8 +127,8 @@ namespace DigitalSignServer.Reposetories
                 using var loaded = new PdfLoadedDocument(pdfMs);
 
                 // דיפולטים גלובליים לגודל חתימה יחסית לעמוד
-                const double DEFAULT_W = 0.25; // 25% מרוחב
-                const double DEFAULT_H = 0.08; // 8% מגובה
+                const double DEFAULT_W = 0.15; // 25% מרוחב
+                const double DEFAULT_H = 0.04; // 8% מגובה
 
                 // חיפוש טוקנים, חישוב קואורדינטות יחסיות, ניקוי הטקסט מה-PDF
                 foundSlots = FindAndEraseTokensInPdf(loaded, plans, DEFAULT_W, DEFAULT_H);
@@ -303,18 +303,28 @@ namespace DigitalSignServer.Reposetories
                     var rawTag = ic.ContentControlProperties?.Tag ?? string.Empty;
                     var tag = NormalizeKey(rawTag);
 
+                    //  חדש: דילוג מוחלט על SIGN — לא נספר, לא מוחלף, לא NoMatch
+                    if (IsPureSignTag(tag))
+                    {
+                        // לא לרדת פנימה ולא לגעת בתוכן — נשאיר לשלב הזרקת הטוקנים
+                        if (ic is Syncfusion.DocIO.DLS.ICompositeEntity _) { /* לא מחליפים ולא סורקים פנימה */ }
+                        continue;
+                    }
+
                     if (!string.IsNullOrWhiteSpace(tag))
                     {
                         summary.EncounteredKeys.Add(tag);
                         if (values.TryGetValue(tag, out var val))
                         {
-                            if (ic is Syncfusion.DocIO.DLS.ICompositeEntity icComp)
-                            {
-                                icComp.ChildEntities.Clear();
-                                icComp.ChildEntities.Add(new Syncfusion.DocIO.DLS.WTextRange(ic.Document) { Text = val ?? string.Empty });
-                                summary.ControlsReplaced++;
-                                summary.AppliedKeys.Add(tag);
-                            }
+                            var tr = new Syncfusion.DocIO.DLS.WTextRange(ic.Document) { Text = val ?? string.Empty };
+                            children.RemoveAt(i);
+                            children.Insert(i, tr);
+
+                            summary.ControlsReplaced++;
+                            summary.AppliedKeys.Add(tag);
+
+                            // חשוב: לא לרדת פנימה ולא להמשיך לגעת ב-ic שהוסר
+                            continue;
                         }
                         else
                         {
@@ -333,6 +343,12 @@ namespace DigitalSignServer.Reposetories
                     summary.ControlsVisited++;
                     var rawTag = bc.ContentControlProperties?.Tag ?? string.Empty;
                     var tag = NormalizeKey(rawTag);
+
+                    if (IsPureSignTag(tag))
+                    {
+                        // לא לרדת פנימה — משאירים את ה־CC כפי שהוא לשלב הטוקנים
+                        continue;
+                    }
 
                     if (!string.IsNullOrWhiteSpace(tag))
                     {
@@ -372,7 +388,24 @@ namespace DigitalSignServer.Reposetories
             }
         }
 
-        private static string NormalizeKey(string s) => (s ?? string.Empty).Trim();
+        private static string NormalizeKey(string s)
+        {
+            if (s == null) return string.Empty;
+
+            // מסיר תווי כיווניות/בקרה נפוצים, וממיר NBSP לרווח רגיל
+            var cleaned = s
+                .Replace('\u00A0', ' ')   // NBSP
+                .Replace("\u200E", "")    // LRM
+                .Replace("\u200F", "")    // RLM
+                .Replace("\u202A", "")    // LRE
+                .Replace("\u202B", "")    // RLE
+                .Replace("\u202C", "")    // PDF
+                .Replace("\u202D", "")    // LRO
+                .Replace("\u202E", "");   // RLO
+
+            return cleaned.Trim();
+        }
+
 
         private sealed class ReplacementSummary
         {
@@ -577,106 +610,6 @@ namespace DigitalSignServer.Reposetories
             }
         }
 
-
-        // בניית טוקן ייחודי שלא נשבר בקלות
-        //private static string BuildSignToken(string slotKey, Guid guid)
-        //    => $"§§SIGN::{slotKey}::{guid:N}§§";
-
-        // תכנית הזרקה (לכל Anchor נוצרת תכנית slotKey + token)
-        //private sealed record SlotPlan(string SlotKey, string Token, int Order);
-
-        // הזרקת טוקנים לפי anchors (Tag="SIGN" בלבד) — קבוצה "default"
-        //private static List<SlotPlan> InjectSignTokens(WordDocument docForPdf, IEnumerable<TemplateSignatureAnchor> anchors)
-        //{
-        //    var plans = new List<SlotPlan>();
-        //    int running = 0;
-
-        //    foreach (var a in anchors.OrderBy(x => x.Order))
-        //    {
-        //        var slotKey = $"default.{++running}";
-        //        var token = BuildSignToken(slotKey, Guid.NewGuid());
-        //        plans.Add(new SlotPlan(slotKey, token, a.Order));
-        //    }
-
-        //    // הזרקה לפי סדר הופעה בפועל במסמך (נסרוק את ה-CCs ונחליף את הראשונים ב-token)
-        //    int applied = 0;
-        //    foreach (var (cc, raw) in EnumerateSignControls(docForPdf).Where(t => IsPureSignTag(t.RawTag)))
-        //    {
-        //        if (applied >= plans.Count) break;
-        //        var plan = plans[applied++];
-
-        //        if (cc is ICompositeEntity comp)
-        //        {
-        //            comp.ChildEntities.Clear();
-        //            comp.ChildEntities.Add(new WTextRange(((Entity)cc).Document) { Text = plan.Token });
-        //        }
-        //    }
-
-        //    return plans;
-        //}
-
-        // בדיקה פשוטה לתגית SIGN (ללא parsing נוסף)
-        //private static bool IsPureSignTag(string? tag)
-        //{
-        //    var t = (tag ?? string.Empty).Trim();
-        //    return t.Equals("SIGN", StringComparison.OrdinalIgnoreCase);
-        //}
-
-        // החזרת כל ה-ContentControls במסמך (inline/block) כולל כותרות/כותרות תחתונות
-        //private static IEnumerable<(IInlineContentControl CC, string RawTag)> EnumerateSignControls(WordDocument doc)
-        //{
-        //    foreach (WSection sec in doc.Sections)
-        //    {
-        //        if (sec?.Body != null && sec.Body is ICompositeEntity body)
-        //        {
-        //            foreach (var tuple in EnumerateComposite(body))
-        //                yield return tuple;
-        //        }
-
-        //        var hf = sec.HeadersFooters;
-        //        if (hf != null)
-        //        {
-        //            foreach (var part in new[] { hf.OddHeader, hf.OddFooter, hf.EvenHeader, hf.EvenFooter, hf.FirstPageHeader, hf.FirstPageFooter })
-        //                if (part is ICompositeEntity comp)
-        //                    foreach (var tuple in EnumerateComposite(comp))
-        //                        yield return tuple;
-        //        }
-        //    }
-
-        //    static IEnumerable<(IInlineContentControl, string)> EnumerateComposite(ICompositeEntity comp)
-        //    {
-        //        for (int i = 0; i < comp.ChildEntities.Count; i++)
-        //        {
-        //            var ent = comp.ChildEntities[i];
-
-        //            if (ent is InlineContentControl ic)
-        //            {
-        //                var tag = ic.ContentControlProperties?.Tag ?? string.Empty;
-        //                yield return (ic, tag);
-        //                if (ic is ICompositeEntity nest)
-        //                    foreach (var t in EnumerateComposite(nest)) yield return t;
-        //            }
-        //            else if (ent is BlockContentControl bc)
-        //            {
-        //                var tag = bc.ContentControlProperties?.Tag ?? string.Empty;
-        //                // נרד פנימה
-        //                foreach (var t in EnumerateComposite(bc.TextBody)) yield return t;
-        //            }
-        //            else if (ent is WParagraph p)
-        //            {
-        //                if (p is ICompositeEntity pi)
-        //                    foreach (var t in EnumerateComposite(pi)) yield return t;
-        //            }
-        //            else if (ent is WTable tbl)
-        //            {
-        //                foreach (WTableRow r in tbl.Rows)
-        //                    foreach (WTableCell c in r.Cells)
-        //                        foreach (var t in EnumerateComposite(c)) yield return t;
-        //            }
-        //        }
-        //    }
-        //}
-
         private sealed record FoundSlot(string SlotKey, int PageIndex, double X, double Y, double W, double H, int Order);
 
         // חיפוש טוקנים ב-PDF, חישוב קואורדינטות יחסיות (0..1), ניקוי הטקסט
@@ -688,14 +621,9 @@ namespace DigitalSignServer.Reposetories
         {
             var res = new List<FoundSlot>();
 
-            // אפשר לכוונן כאן:
-            const double OFFSET_X = 0.010;   // 1% מרוחב העמוד – ימינה
-            const double OFFSET_Y = 0.012;   // 1.2% מגובה העמוד – למטה
-            const bool ANCHOR_CENTER = false;    // אם true – מרכזים את החתימה מעל ה-union
-            const bool ANCHOR_RIGHT_TOP = true;  // אם true – מעגנים בימין-עליון של ה-union (+offset)
-
             foreach (var plan in plans)
             {
+                // מחפש את הטקסט במסמך
                 if (!loaded.FindText(plan.Token, out Dictionary<int, List<Syncfusion.Drawing.RectangleF>> matches)
                     || matches.Count == 0)
                     continue;
@@ -709,73 +637,33 @@ namespace DigitalSignServer.Reposetories
                     var pw = page.Size.Width;
                     var ph = page.Size.Height;
 
-                    // איחוד כל המלבנים למלבן אחד
-                    var union = UnionRect(kv.Value);
-                    // מחיקה ויזואלית של הטוקן
-                    page.Graphics.DrawRectangle(PdfBrushes.White, union);
-
-                    // חישוב מיקום נורמליזי (0..1) לשמירה בדאטהבייס
-                    double xNorm, yNormTop;
-
-                    if (ANCHOR_CENTER)
+                    foreach (var r in kv.Value)
                     {
-                        var cx = (union.X + union.Width / 2.0) / pw;
-                        var cyTop = 1.0 - ((union.Y + union.Height / 2.0) / ph); // cy כמרחק מהחלק העליון (נורמליזי)
-                                                                                 // הופכים מרכז ל-Top-Left של החתימה (לפי defaultW/H)
-                        xNorm = cx - (defaultW / 2.0);
-                        yNormTop = cyTop - (defaultH / 2.0);
-                    }
-                    else if (ANCHOR_RIGHT_TOP)
-                    {
-                        var right = (union.X + union.Width) / pw;                 // שפת ימין של ה-union
-                        var top = 1.0 - ((union.Y + union.Height) / ph);          // קצה עליון כנורמליזי (Top origin)
-                        xNorm = right;                                            // נתחיל מהימין
-                        yNormTop = top;                                           // ומהעליון
-                                                                                  // הזחה קלה: ימינה ולמטה (ב-Top origin זה הוספה)
-                        xNorm += OFFSET_X;
-                        yNormTop += OFFSET_Y;
-                    }
-                    else
-                    {
-                        // עיגון פשוט בפינת שמאל-עליון (המצב הישן) + הזחה קלה
-                        var left = union.X / pw;
-                        var top = 1.0 - ((union.Y + union.Height) / ph);
-                        xNorm = left + OFFSET_X;
-                        yNormTop = top + OFFSET_Y;
-                    }
+                        // r כבר Syncfusion.Drawing.RectangleF
+                        // “מחיקה” ויזואלית של הטוקן (כיסוי בלבן)
+                        page.Graphics.DrawRectangle(PdfBrushes.White, r);
 
-                    // תחום 0..1 ושמירה
-                    xNorm = Clamp01(xNorm);
-                    yNormTop = Clamp01(yNormTop);
+                        // חישוב קואורדינטות יחסיות
+                        var x = r.X / pw;
+                        var yTop = (r.Y + r.Height) / ph;
+                        var y = 1.0 - yTop;
 
-                    res.Add(new FoundSlot(
-                        SlotKey: plan.SlotKey,
-                        PageIndex: pageIndex,
-                        X: xNorm,
-                        Y: yNormTop,
-                        W: Clamp01(defaultW),
-                        H: Clamp01(defaultH),
-                        Order: plan.Order
-                    ));
+                        res.Add(new FoundSlot(
+                            SlotKey: plan.SlotKey,
+                            PageIndex: pageIndex,
+                            X: Clamp01(x),
+                            Y: Clamp01(y),
+                            W: Clamp01(defaultW),
+                            H: Clamp01(defaultH),
+                            Order: plan.Order
+                        ));
+                    }
                 }
             }
+
             return res;
 
-            static Syncfusion.Drawing.RectangleF UnionRect(List<Syncfusion.Drawing.RectangleF> rects)
-            {
-                if (rects == null || rects.Count == 0) return Syncfusion.Drawing.RectangleF.Empty;
-                float minX = rects[0].X, minY = rects[0].Y, maxX = rects[0].Right, maxY = rects[0].Top;
-                foreach (var r in rects)
-                {
-                    if (r.X < minX) minX = r.X;
-                    if (r.Y < minY) minY = r.Y;
-                    if (r.Right > maxX) maxX = r.Right;
-                    if (r.Top > maxY) maxY = r.Top;
-                }
-                return new Syncfusion.Drawing.RectangleF(minX, minY, maxX - minX, maxY - minY);
-            }
-            static double Clamp01(double v) => v < 0 ? 0 : (v > 1 ? 1 : v);
+            static double Clamp01(double v) => Math.Max(0, Math.Min(1, v));
         }
-
     }
 }

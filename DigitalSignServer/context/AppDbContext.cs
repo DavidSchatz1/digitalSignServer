@@ -24,6 +24,9 @@ namespace DigitalSignServer.context
         public DbSet<TemplateSignatureAnchor> TemplateSignatureAnchors { get; set; } = null!;
         public DbSet<TemplateInstanceSignatureSlot> TemplateInstanceSignatureSlots { get; set; } = null!;
 
+        public DbSet<SignatureAuditEvent> SignatureAuditEvents => Set<SignatureAuditEvent>();
+
+
 
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)

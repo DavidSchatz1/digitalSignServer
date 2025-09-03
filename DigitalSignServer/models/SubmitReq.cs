@@ -1,4 +1,6 @@
-﻿namespace DigitalSignServer.models
+﻿using DigitalSignServer.dto;
+
+namespace DigitalSignServer.models
 {
     public record SubmitReq
     {
@@ -18,6 +20,9 @@
         public bool DrawName { get; init; } = true;
         public bool DrawTimestamp { get; init; } = true;
         public string? Tz { get; init; }
+
+        public ClientInfoDto? ClientInfo { get; set; } 
+
     }
 
 }
