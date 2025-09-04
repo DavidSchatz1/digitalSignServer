@@ -10,7 +10,6 @@ using System.Text;
 using Syncfusion.Pdf.Graphics;
 using Syncfusion.Pdf.Parsing;
 using System.Text.RegularExpressions;
-using DocumentFormat.OpenXml.VariantTypes;
 using Syncfusion.Pdf;
 using System.Text.RegularExpressions;
 using DigitalSignServer.models;
@@ -18,6 +17,9 @@ using DigitalSignServer.services;
 using System.Net;
 using DigitalSignServer.Utils;
 using DigitalSignServer.dto;
+using DigitalSignServer.Services;
+using Syncfusion.Pdf.Security;
+using Syncfusion.Pdf.Interactive;
 
 
 namespace DigitalSignServer.controller
@@ -32,13 +34,17 @@ namespace DigitalSignServer.controller
         private readonly IPasswordHasher<object> _passwordHasher;
         private readonly INotificationService _notifier;
         private readonly ILogger<PublicSignController> _logger;
+        private readonly ISigningCertProvider _signingCertProvider;
 
-        public PublicSignController(AppDbContext db, IFileStorage storage, INotificationService notifier, ILogger<PublicSignController> logger)
+
+        public PublicSignController(AppDbContext db, IFileStorage storage, INotificationService notifier, ILogger<PublicSignController> logger, ISigningCertProvider signingCertProvider, IPasswordHasher<object> passwordHasher)
         {
             _db = db;
             _storage = storage;
             _notifier = notifier;
             _logger = logger;
+            _signingCertProvider = signingCertProvider;
+            _passwordHasher = passwordHasher; //make sure this doesnt break anything
         }
 
         [HttpGet("{token}/bootstrap")]
@@ -191,6 +197,7 @@ namespace DigitalSignServer.controller
         // 2) קריאת ה-PDF המקורי ל-MemoryStream עצמאי
         byte[] pdfBytes;
         await using (var s3In = await _storage.OpenReadAsync(instance.S3KeyPdf, ct))
+               
         using (var msIn = new MemoryStream())
         {
             await s3In.CopyToAsync(msIn, ct);
@@ -253,35 +260,35 @@ namespace DigitalSignServer.controller
             return UnprocessableEntity(new { error = "BadSignatureImage" });
         }
 
-        // 6) ציור החתימה/שם/זמן על כל היעדים
-        foreach (var t in targets)
-        {
-            var pageIndex = Math.Clamp(t.page, 0, loadedDoc.Pages.Count - 1);
-            var page = (PdfLoadedPage)loadedDoc.Pages[pageIndex];
-
-            var pageW = page.Size.Width;
-            var pageH = page.Size.Height;
-
-            // יחסיים (0..1) → נקודות PDF
-            var drawW = Math.Max(1, t.w * pageW);
-            var drawH = Math.Max(1, t.h * pageH);
-
-            var left = Math.Clamp(t.x * pageW, 0, pageW - drawW);
-            // yTop הוא יחס מהחלק העליון; הופכים לתחתית:
-            var yTop = t.y * pageH;
-            var bottom = Math.Clamp(pageH - (yTop + drawH), 0, pageH - drawH);
-
-            var rect = new Syncfusion.Drawing.RectangleF((float)left, (float)bottom, (float)drawW, (float)drawH);
-
-            // ציור החתימה (כל יעד מקבל stream חדש מהבייטים)
-            using (var bmpStream = new MemoryStream(sigBytes, writable: false))
+            // 6) ציור החתימה/שם/זמן על כל היעדים
+            foreach (var t in targets)
             {
-                var bmp = new PdfBitmap(bmpStream);
-                page.Graphics.DrawImage(bmp, rect);
-            }
+                var pageIndex = Math.Clamp(t.page, 0, loadedDoc.Pages.Count - 1);
+                var page = (PdfLoadedPage)loadedDoc.Pages[pageIndex];
 
-                //טקסט שם/ זמן(אופציונלי)
-            if (req.DrawName || req.DrawTimestamp)
+                var pageW = page.Size.Width;
+                var pageH = page.Size.Height;
+
+                // יחסיים (0..1) → נקודות PDF
+                var drawW = Math.Max(1, t.w * pageW);
+                var drawH = Math.Max(1, t.h * pageH);
+
+                var left = Math.Clamp(t.x * pageW, 0, pageW - drawW);
+                // yTop הוא יחס מהחלק העליון; הופכים לתחתית:
+                var yTop = t.y * pageH;
+                var bottom = Math.Clamp(pageH - (yTop + drawH), 0, pageH - drawH);
+
+                var rect = new Syncfusion.Drawing.RectangleF((float)left, (float)bottom, (float)drawW, (float)drawH);
+
+                // ציור החתימה (כל יעד מקבל stream חדש מהבייטים)
+                using (var bmpStream = new MemoryStream(sigBytes, writable: false))
+                {
+                    var bmp = new PdfBitmap(bmpStream);
+                    page.Graphics.DrawImage(bmp, rect);
+                }
+
+                // טקסט שם/זמן (אופציונלי)
+                if (req.DrawName || req.DrawTimestamp)
                 {
                     var font = new PdfStandardFont(PdfFontFamily.Helvetica, 10f, PdfFontStyle.Regular);
                     var brush = PdfBrushes.Black;
@@ -295,8 +302,6 @@ namespace DigitalSignServer.controller
 
                     if (req.DrawTimestamp)
                     {
-                        var tz = req.Tz ?? "UTC";
-                        // לשלב הבא: המרת TZ אמיתית; לעת עתה UTC
                         var stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm 'UTC'");
                         parts.Add(stamp);
                     }
@@ -307,30 +312,140 @@ namespace DigitalSignServer.controller
                         page.Graphics.DrawString(text, font, brush, new Syncfusion.Drawing.PointF(rect.X, textY));
                     }
                 }
-
             }
 
-        // 7) שמירה החוצה ל־MemoryStream חדש → העלאה ל-S3
-        byte[] signedPdfBytes;
-        using (var msOut = new MemoryStream())
-        {
-            loadedDoc.Save(msOut);
-            signedPdfBytes = msOut.ToArray();
-        }
+            // === חתימה דיגיטלית בסיסית (Invisible) — לפני שלב 7 ===
+            try
+            {
+                // שולף את התעודה עם המפתח הפרטי מספק החתימות שלך
+                var x509 = _signingCertProvider.GetCertificate();
 
-        var signedKey = $"{Path.GetDirectoryName(instance.S3KeyPdf)!.Replace('\\', '/')}/signed.pdf";
-        await using (var up = new MemoryStream(signedPdfBytes, writable: false))
-        {
-            await _storage.SaveAsync(up, signedKey, "application/pdf", ct);
-        }
+                // יוצר PdfCertificate ישירות מ-X509Certificate2
+                var pdfCert = new PdfCertificate(x509);
 
-        // 8) עדכון סטטוס המופע
-        instance.Status = "Signed";
-        instance.SignedPdfS3Key = signedKey;
-        instance.SignedAt = DateTime.UtcNow;
-        instance.UpdatedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        await LogAuditAsync(invite, "SignatureSubmitted", req.ClientInfo, ct);
+                // חותם בעמוד הראשון (החתימה בלתי-נראית: Bounds 0x0)
+                var firstPage = (PdfLoadedPage)loadedDoc.Pages[0];
+                var signature = new PdfSignature(loadedDoc, firstPage, pdfCert, "DigitalSignature");
+
+                // החתימה לא מצוירת על הדף (בלתי-נראית), אך נוכחת בקריפטוגרפיה ונועלת את המסמך
+                signature.Bounds = new Syncfusion.Drawing.RectangleF(0, 0, 0, 0);
+
+                // (אופציונלי) פרטי Reason/Location/Contact
+                signature.Reason = "Digitally signed by the signer";
+                signature.LocationInfo = "IL";
+                signature.ContactInfo = invite.RecipientEmail ?? invite.SignerEmail;
+
+                // לא נוגעים כרגע ב-Settings (Digest/CAdES) כדי להימנע מתלויות גרסה — ברירת המחדל היא SHA-256.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to attach digital signature; proceeding without DS.");
+                // בפרודקשן אפשר לשקול להפוך את זה ל-blocking אם נדרש שנעילה תהיה חובה.
+            }
+
+
+            // 7) שמירה החוצה ל־MemoryStream חדש → העלאה ל-S3
+            byte[] signedPdfBytes;
+            using (var msOut = new MemoryStream())
+            {
+                loadedDoc.Save(msOut); // בשמירה מוטבעת החתימה הדיגיטלית
+                signedPdfBytes = msOut.ToArray();
+            }
+
+            var signedKey = $"{Path.GetDirectoryName(instance.S3KeyPdf)!.Replace('\\', '/')}/signed.pdf";
+            await using (var up = new MemoryStream(signedPdfBytes, writable: false))
+            {
+                await _storage.SaveAsync(up, signedKey, "application/pdf", ct);
+            }
+
+            //לעת הצורך - אני משאיר כאן קוד מתאים לשילוב של תמונה בתוך החתימה הדיגטלית - מתאים להכנסת לוגו במקום חתימה בלתי נראית
+            // using למעלה:
+            //using Syncfusion.Pdf.Security;
+            //using Syncfusion.Pdf.Graphics;
+            //using System.Security.Cryptography.X509Certificates;
+            //using System.Drawing; // ל-SizeF/PointF במידת הצורך
+
+            //try
+            //{
+            //    var x509 = _signingCertProvider.GetCertificate();
+            //    var pdfCert = new PdfCertificate(x509);
+
+            //    var firstPage = (PdfLoadedPage)loadedDoc.Pages[0];
+
+            //    // גודל/מיקום בפיקסלים של PDF (נקודות). ממקמים בפינה הימנית-תחתונה עם שוליים.
+            //    const float boxW = 120f;   // ~4.2 ס״מ
+            //    const float boxH = 40f;    // ~1.4 ס״מ
+            //    const float margin = 18f;  // 0.25"
+
+            //    var pageW = firstPage.Size.Width;
+            //    var pageH = firstPage.Size.Height;
+
+            //    // חישוב פינה ימנית-תחתונה
+            //    var x = pageW - boxW - margin;
+            //    var y = margin; // ב-Syncfusion מקור הצירים בתחתית: y קטן = קרוב לתחתית
+            //    var bounds = new Syncfusion.Drawing.RectangleF(x, y, boxW, boxH);
+
+            //    // חתימה דיגיטלית עם הופעה נראית
+            //    var signature = new PdfSignature(loadedDoc, firstPage, pdfCert, "DigitalSignature");
+            //    signature.Bounds = bounds;
+
+            //    // פרטים (לא חובה)
+            //    signature.Reason = "Digitally signed by the signer";
+            //    signature.LocationInfo = "IL";
+            //    signature.ContactInfo = invite.RecipientEmail ?? invite.SignerEmail;
+
+            //    // Appearance: ציור עדין עם שקיפות ולוגו/טקסט
+            //    var g = signature.Appearance.Normal.Graphics;
+
+            //    // שקיפות כוללת (0..1)
+            //    g.SetTransparency(0.35f);
+
+            //    // רקע עדין
+            //    g.DrawRectangle(PdfPens.Gray, PdfBrushes.WhiteSmoke, bounds);
+
+            //    // נסה לצייר לוגו אם יש (למשל PNG קטן שנשלף מס3/תיקיית משאבים)
+            //    // אם אין לך עכשיו לוגו — בטל את הבלוק הזה ויישאר טקסט בלבד.
+            //    try
+            //    {
+            //        // דוגמה: לוגו מתוך byte[] logoBytes
+            //        // byte[] logoBytes = await _storage.ReadAllBytesAsync("branding/signature-stamp.png", ct);
+            //        // using var logoMs = new MemoryStream(logoBytes);
+            //        // var logo = new PdfBitmap(logoMs);
+            //        // float imgH = bounds.Height - 8f, imgW = imgH; // ריבוע קטן
+            //        // g.DrawImage(logo, bounds.X + 4f, bounds.Y + 4f, imgW, imgH);
+            //    }
+            //    catch { /* לוגו לא קריטי */ }
+
+            //    // טקסט “Digitally signed”
+            //    var font = new PdfStandardFont(PdfFontFamily.Helvetica, 9f, PdfFontStyle.Regular);
+            //    var brush = PdfBrushes.Black;
+
+            //    // מקם טקסט משמאל לאזור הלוגו (או מתחילת הריבוע אם אין לוגו)
+            //    float textLeft = bounds.X + 8f; // אם ציירת לוגו, תן מרווח גדול יותר, למשל + (imgW + 8f)
+            //    float textTop = bounds.Y + (bounds.Height / 2f) - 6f;
+
+            //    g.DrawString("Digitally signed", font, brush, new Syncfusion.Drawing.PointF(textLeft, textTop));
+
+            //    // אם תרצה להוסיף תאריך קצר בתוך ההופעה (ויזואלי בלבד):
+            //    // var ts = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            //    // g.DrawString(ts, font, PdfBrushes.DarkGray, new Syncfusion.Drawing.PointF(textLeft, textTop - 12f));
+
+            //    // מחזיר שקיפות לברירת מחדל לשאר ציורים עתידיים (לא חובה כאן)
+            //    g.SetTransparency(1f);
+            //}
+            //catch (Exception ex)
+            //{
+            //    _logger.LogError(ex, "Failed to create visible digital signature; proceeding without DS.");
+            //}
+
+
+            // 8) עדכון סטטוס המופע
+            instance.Status = "Signed";
+            instance.SignedPdfS3Key = signedKey;
+            instance.SignedAt = DateTime.UtcNow;
+            instance.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            await LogAuditAsync(invite, "SignatureSubmitted", req.ClientInfo, ct);
 
 
             // 9) שליחת מייל ליעדי החתימה
@@ -412,6 +527,57 @@ namespace DigitalSignServer.controller
             {
                 _logger.LogError(ex, "Failed sending signed PDF to sender {Email}", customerEmail);
             }
+
+
+            // ===== מחיקת הקבצים מה-S3: filled.docx, filled.pdf, signed.pdf =====
+            var keysToDelete = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(instance.S3KeyDocx))
+                keysToDelete.Add(instance.S3KeyDocx!);      // filled.docx
+
+            if (!string.IsNullOrWhiteSpace(instance.S3KeyPdf))
+                keysToDelete.Add(instance.S3KeyPdf!);       // filled.pdf
+
+            if (!string.IsNullOrWhiteSpace(signedKey))
+                keysToDelete.Add(signedKey);                // signed.pdf (כרגע שמור; מוחקים מיידית)
+
+            foreach (var key in keysToDelete)
+            {
+                try
+                {
+                    await _storage.DeleteAsync(key, ct);
+                    _logger.LogInformation("Deleted S3 object: {Key}", key);
+                }
+                catch (Exception ex)
+                {
+                    // לא מפילים את ההליך — רק לוג ברמת Warning
+                    _logger.LogWarning(ex, "Failed to delete S3 object: {Key}", key);
+                }
+            }
+       
+            instance.SignedPdfS3Key = null;
+
+            // אפשרות: עדכן סטטוס סופי שמרמז שאין קבצים שמורים (אופציונלי)
+            instance.Status = "Completed";
+            instance.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+
+            _db.SignatureAuditEvents.Add(new SignatureAuditEvent
+            {
+                Id = Guid.NewGuid(),
+                InviteId = invite.Id,
+                Action = "FilesPurged",
+                CreatedAt = DateTime.UtcNow,
+            });
+            var slots = await _db.TemplateInstanceSignatureSlots
+                .Where(s => s.TemplateInstanceId == instance.Id)
+                .ToListAsync(ct);
+            if (slots.Count > 0)
+            {
+                _db.TemplateInstanceSignatureSlots.RemoveRange(slots);
+            }
+            await _db.SaveChangesAsync(ct);
 
 
 

@@ -27,18 +27,4 @@
         public DateTime? OpenedAt { get; set; }
         public DateTime? SignedAt { get; set; }
     }
-
-    // models/SignatureDelivery.cs  (אופציונלי אבל מומלץ ללוג משלוח)
-    public class SignatureDelivery
-    {
-        public Guid Id { get; set; }
-        public Guid InviteId { get; set; }
-        public SignatureInvite Invite { get; set; } = default!;
-        public string Channel { get; set; } = "Email";
-        public string Status { get; set; } = "Sent";             // Sent/Failed
-        public string? ProviderMessageId { get; set; }
-        public DateTime AttemptedAt { get; set; }
-        public string? Error { get; set; }
-    }
-
 }

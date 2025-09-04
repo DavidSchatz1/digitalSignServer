@@ -72,6 +72,8 @@ namespace DigitalSignServer
             builder.Services.AddScoped<ICustomerAuthService, CustomerAuthService>();
             builder.Services.AddScoped<TemplateFillService>();
             builder.Services.AddScoped<ITemplateFillRepository, TemplateFillRepository>();
+            builder.Services.Configure<SigningOptions>(builder.Configuration.GetSection("Signing"));
+            builder.Services.AddSingleton<ISigningCertProvider, SigningCertProvider>();
 
 
 

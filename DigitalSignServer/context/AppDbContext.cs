@@ -19,7 +19,6 @@ namespace DigitalSignServer.context
 
         public DbSet<TemplateInstance> TemplateInstances => Set<TemplateInstance>();
         public DbSet<SignatureInvite> SignatureInvites { get; set; } = default!;
-        public DbSet<SignatureDelivery> SignatureDeliveries { get; set; } = default!;
 
         public DbSet<TemplateSignatureAnchor> TemplateSignatureAnchors { get; set; } = null!;
         public DbSet<TemplateInstanceSignatureSlot> TemplateInstanceSignatureSlots { get; set; } = null!;
