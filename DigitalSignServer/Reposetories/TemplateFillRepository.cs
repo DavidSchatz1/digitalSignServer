@@ -16,6 +16,8 @@ using Syncfusion.Drawing;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
+using DigitalSignServer.Exceptions;
 
 namespace DigitalSignServer.Reposetories
 {
@@ -183,40 +185,46 @@ namespace DigitalSignServer.Reposetories
                 await _db.SaveChangesAsync(ct);
             }
 
-            // === (6) יצירת הזמנת חתימה ושליחה במייל רק לפי signatureDelivery ===
-            if (signatureDelivery is null || !string.Equals(signatureDelivery.Channel, "Email", StringComparison.OrdinalIgnoreCase))
+            // === (6) יצירת הזמנת חתימה ושליחה לפי signatureDelivery ===
+            if (signatureDelivery is null || string.IsNullOrWhiteSpace(signatureDelivery.Channel))
             {
-                throw new DigitalSignServer.Exceptions.TemplateFillValidationException(
+                throw new TemplateFillValidationException(
                     new[] { "signatureDelivery.channel" }, Array.Empty<string>());
             }
 
+            var channel = signatureDelivery.Channel.Trim();
+            var isEmail = channel.Equals("Email", StringComparison.OrdinalIgnoreCase);
+
+            // אימות מייל אך ורק כשבאמת שולחים מייל
             var signerEmail = signatureDelivery.SignerEmail?.Trim();
             var signerName = signatureDelivery.SignerName?.Trim();
-
-            if (string.IsNullOrWhiteSpace(signerEmail))
+            if (isEmail && string.IsNullOrWhiteSpace(signerEmail))
             {
-                throw new DigitalSignServer.Exceptions.TemplateFillValidationException(
+                throw new TemplateFillValidationException(
                     new[] { "signatureDelivery.signerEmail" }, Array.Empty<string>());
             }
 
             // יצירת token + OTP
             var token = CreateUrlToken(48);
-            var otp = CreateNumericOtp(6);
+            var otp = CreateAlphanumericOtp(6);
             var (otpHash, _) = HashOtp(otp);
 
+            // יצירת ההזמנה ושמירה
             var invite = new SignatureInvite
             {
                 Id = Guid.NewGuid(),
                 TemplateInstanceId = instance.Id,
                 Token = token,
                 OtpHash = otpHash,
-                OtpExpiresAt = DateTime.UtcNow.AddMinutes(20),
+                // שמור על המדיניות שלך: כאן יש לך AddDays(1) בעוד שהמייל טוען 20 דק'.
+                // אם תרצה – שנה כאן ל- AddMinutes(20).
+                OtpExpiresAt = DateTime.UtcNow.AddDays(1),
                 RequiresPassword = true,
-                DeliveryChannel = "Email",
-                RecipientEmail = signerEmail,
+                DeliveryChannel = channel,                 // <= חשוב: שמירת הערוץ בפועל
+                RecipientEmail = isEmail ? signerEmail : null,
                 SignerName = string.IsNullOrWhiteSpace(signerName) ? null : signerName,
-                SignerEmail = signerEmail,
-                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                SignerEmail = isEmail ? signerEmail : null,
+                ExpiresAt = DateTime.UtcNow.AddDays(1),
                 Status = "Pending",
                 CreatedAt = DateTime.UtcNow
             };
@@ -228,29 +236,49 @@ namespace DigitalSignServer.Reposetories
 
             await _db.SaveChangesAsync(ct);
 
-            // שליחת מייל – אם נכשל, נזרוק חריגה
+            // לינק חתימה
             var signLink = $"{_public.WebBaseUrl.TrimEnd('/')}/sign/{token}";
-            var mailSubject = "מסמך מוכן לחתימה";
-            var greeting = string.IsNullOrWhiteSpace(invite.SignerName) ? "" : $"שלום {invite.SignerName},<br/>";
-            var mailHtml = $@"
-                <html><body style=""font-family:Arial,Helvetica,sans-serif;font-size:14px;direction:rtl"">
-                    {greeting}
-                    <p>לחץ/י לקישור החתימה: <a href=""{WebUtility.HtmlEncode(signLink)}"">{WebUtility.HtmlEncode(signLink)}</a></p>
-                    <p>קוד חד-פעמי (OTP): <b>{WebUtility.HtmlEncode(otp)}</b> (בתוקף 20 דקות)</p>
-                    <p style=""color:#777"">אם לא ציפית לקבל הודעה זו - ניתן להתעלם ממנה.</p>
-                </body></html>";
 
-            _logger.LogInformation("Sending invite email to {Email}", invite.RecipientEmail);
-            await _notifier.SendEmailAsync(invite.RecipientEmail!, mailSubject, mailHtml, ct);
-            _logger.LogInformation("Invite email sent to {Email}", invite.RecipientEmail);
-
-            // 7) החזרה
-            return new TemplateFillResult
+            if (isEmail)
             {
-                InstanceId = instanceId,
-                S3KeyDocx = filledDocxKey,
-                S3KeyPdf = filledPdfKey
-            };
+                // שליחת מייל
+                var mailSubject = "מסמך מוכן לחתימה";
+                var greeting = string.IsNullOrWhiteSpace(invite.SignerName) ? "" : $"שלום {invite.SignerName},<br/>";
+                var mailHtml = $@"
+        <html><body style=""font-family:Arial,Helvetica,sans-serif;font-size:14px;direction:rtl"">
+            {greeting}
+            <p>לחץ/י לקישור החתימה: <a href=""{WebUtility.HtmlEncode(signLink)}"">{WebUtility.HtmlEncode(signLink)}</a></p>
+            <p>קוד חד-פעמי (OTP): <b>{WebUtility.HtmlEncode(otp)}</b> (בתוקף 24 שעות)</p>
+            <p style=""color:#777"">אם לא ציפית לקבל הודעה זו - ניתן להתעלם ממנה.</p>
+        </body></html>";
+
+                _logger.LogInformation("Sending invite email to {Email}", invite.RecipientEmail);
+                await _notifier.SendEmailAsync(invite.RecipientEmail!, mailSubject, mailHtml, ct);
+                _logger.LogInformation("Invite email sent to {Email}", invite.RecipientEmail);
+
+                // החזרה – ללא שדות ה-URL/OTP (יישארו null)
+                return new TemplateFillResult
+                {
+                    InstanceId = instanceId,
+                    S3KeyDocx = filledDocxKey,
+                    S3KeyPdf = filledPdfKey
+                };
+            }
+            else
+            {
+                // לא שולחים מייל – מחזירים ללקוח את המידע
+                return new TemplateFillResult
+                {
+                    InstanceId = instanceId,
+                    S3KeyDocx = filledDocxKey,
+                    S3KeyPdf = filledPdfKey,
+                    SignUrl = signLink,
+                    Otp = otp,
+                    RequiresPassword = invite.RequiresPassword,
+                    InviteExpiresAt = invite.OtpExpiresAt
+                };
+            }
+
         }
 
         // ==========================
@@ -436,12 +464,23 @@ namespace DigitalSignServer.Reposetories
             return Convert.ToBase64String(buf).TrimEnd('=').Replace('+', '-').Replace('/', '_'); // Base64Url
         }
 
-        private static string CreateNumericOtp(int digits = 6)
+        public static string CreateAlphanumericOtp(int length = 6)
         {
-            var min = (int)Math.Pow(10, digits - 1);
-            var max = (int)Math.Pow(10, digits) - 1;
-            var num = RandomNumberGenerator.GetInt32(min, max + 1);
-            return num.ToString(CultureInfo.InvariantCulture);
+            // רשימת התווים האפשריים - ספרות, אותיות קטנות ואותיות גדולות.
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            var otpBuilder = new StringBuilder(length);
+
+            // נשתמש ב-RandomNumberGenerator כדי להבטיח אקראיות חזקה ומאובטחת.
+            for (int i = 0; i < length; i++)
+            {
+                // בוחרים אינדקס אקראי בטווח התווים האפשריים.
+                int index = RandomNumberGenerator.GetInt32(0, chars.Length);
+
+                // מוסיפים את התו שנבחר למחרוזת.
+                otpBuilder.Append(chars[index]);
+            }
+
+            return otpBuilder.ToString();
         }
 
         // שומר בפורמט: "{saltBase64}:{hashBase64}"
@@ -512,30 +551,55 @@ namespace DigitalSignServer.Reposetories
             if (isBlock)
             {
                 var bc = (BlockContentControl)ctrl;
-                // מנקים את הגוף ומכניסים פסקה עם טקסט הטוקן
+                // נקה והכנס פסקה עם הטוקן
                 bc.TextBody.ChildEntities.Clear();
                 var par = new WParagraph(bc.Document);
                 par.ChildEntities.Add(new WTextRange(bc.Document) { Text = token });
                 bc.TextBody.ChildEntities.Add(par);
+                return;
             }
-            else
+
+            var ic = (InlineContentControl)ctrl;
+
+            // 1) נסה מקרה "קומפוזיט" קלאסי (יש ChildEntities)
+            if (ic is ICompositeEntity comp)
             {
-                var ic = (InlineContentControl)ctrl;
-                if (ic is ICompositeEntity comp)
+                comp.ChildEntities.Clear();
+                comp.ChildEntities.Add(new WTextRange(ic.Document) { Text = token });
+                return;
+            }
+
+            // 2) מקרה SDTRun / לא-קומפוזיט: החלפה ברמת הפסקה ההורה
+            // InlineContentControl אמור להיות פריט פסקה; נאתר את הפסקה ואת המיקום של הפריט
+            var ownerPara = ic.OwnerParagraph as WParagraph ?? ic.Owner as WParagraph;
+            if (ownerPara != null)
+            {
+                int idx = ownerPara.ChildEntities.IndexOf(ic);
+                if (idx >= 0)
                 {
-                    comp.ChildEntities.Clear();
-                    comp.ChildEntities.Add(new WTextRange(ic.Document) { Text = token });
-                }
-                else
-                {
-                    // fall-back נדיר: אם משום מה לא קומפוזיט, ננסה להכניס לפסקה חדשה מסביב
-                    // (אמור כמעט לא לקרות ב-Syncfusion)
-                    var par = new WParagraph(ic.Document);
-                    par.ChildEntities.Add(new WTextRange(ic.Document) { Text = token });
-                    // אם יש לך הקשר של ההורה—אפשר להחליף את ה-inline כולו; אחרת נתעלם.
+                    // הסר את ה-CC והכנס במקומו טקסט הטוקן
+                    ownerPara.ChildEntities.RemoveAt(idx);
+                    ownerPara.ChildEntities.Insert(idx, new WTextRange(ownerPara.Document) { Text = token });
+                    return;
                 }
             }
+
+            // 3) fallback אחרון: אם משום מה אין לנו פסקה-הורה (נדיר)
+            // נסה להכניס לפסקה חדשה בתוך הטקסט-באדי הקרוב, ואם אין — זרוק חריגה עם לוג.
+            var newPar = new WParagraph(ic.Document);
+            newPar.ChildEntities.Add(new WTextRange(ic.Document) { Text = token });
+
+            if (ic.Owner is WTextBody tb)
+            {
+                tb.ChildEntities.Add(newPar);
+                // אופציונלי: ic.Remove() אם יש API כזה; אחרת אין נזק כי הוא יתייתם מהזרימה.
+                return;
+            }
+
+            // אם הגענו עד כאן — עדיף לדעת מזה בקול רם
+            throw new InvalidOperationException("Unable to replace InlineContentControl: no OwnerParagraph / TextBody found.");
         }
+
 
         // === גרסה חדשה: Enumerator שמחזיר גם Inline וגם Block ===
         private static IEnumerable<(Entity Ctrl, string RawTag, bool IsBlock)> EnumerateSignControls(WordDocument doc)

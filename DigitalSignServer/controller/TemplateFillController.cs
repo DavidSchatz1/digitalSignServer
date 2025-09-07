@@ -30,15 +30,22 @@ namespace DigitalSignServer.Controllers
                     templateId,
                     customerId,
                     req.Values ?? new Dictionary<string, string>(),
-                    req.SignatureDelivery,                    // <-- חדש: מעבירים הלאה
+                    req.SignatureDelivery,                   
                     ct);
 
                 return Ok(new
                 {
                     instanceId = result.InstanceId,
                     docxKey = result.S3KeyDocx,
-                    pdfKey = result.S3KeyPdf
+                    pdfKey = result.S3KeyPdf,
+
+                    // אופציונלי – יאוישו רק אם הערוץ אינו Email
+                    signUrl = result.SignUrl,
+                    otp = result.Otp,
+                    requiresPassword = result.RequiresPassword,
+                    inviteExpiresAt = result.InviteExpiresAt
                 });
+
             }
             catch (TemplateFillValidationException ex)
             {
